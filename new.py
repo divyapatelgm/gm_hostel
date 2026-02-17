@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+write_file(
+    absolutePath="C:/Documents/Flutter Projects/hostel/lib/screens/features/supervisor/supervisor_grievance_screen.dart",
+    text="""import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:google_fonts/google_fonts.dart';
@@ -383,4 +385,5 @@ class _SupervisorGrievanceScreenState extends State<SupervisorGrievanceScreen> w
           ]
       )
   );
-}
+}"""
+)

@@ -42,41 +42,27 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
     fetchUserPasses();
   }
 
-  // ... (Keeping fetchUserPasses, _pickDocument, formatters the same for logic) ...
   Future<void> fetchUserPasses() async {
-
-    setState(() => isPageLoading = true);try {
-
+    setState(() => isPageLoading = true);
+    try {
       String? userId = await SessionManager.getUserId();
       String? targetDb = await SessionManager.getSelectedDb();
       final response = await http.get(Uri.parse("${AppConstants.getpassUrl}?user_id=$userId&target_db=${targetDb ?? 'gmu'}"));
-      print("userId: $userId, targetDb: $targetDb");
       if (response.statusCode == 200) {
-        // --- PASTE THE NEW LOGIC HERE ---
         final decoded = jsonDecode(response.body);
-        print("Decoded response: $decoded");
         if (decoded is Map && decoded.containsKey('passes')) {
           userPasses = decoded['passes'];
-          if (decoded['late_message'] != null) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) { // Added check to prevent errors if user leaves screen
-              }
-            });
-          }
         } else {
           userPasses = decoded;
         }
-        setState(() {
-          isPageLoading = false;
-        });
-        // --- END OF NEW LOGIC ---
-      } else {
-        setState(() => isPageLoading = false);
       }
     } catch (e) {
-      setState(() => isPageLoading = false);
+      debugPrint("Fetch Error: $e");
+    } finally {
+      if (mounted) setState(() => isPageLoading = false);
     }
   }
+
   Future<void> _pickDocument(StateSetter setModalState) async {
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -97,41 +83,33 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
   }
 
   String formatDateOnly(DateTime date) {
-    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+    return DateFormat('yyyy-MM-dd').format(date);
   }
 
   Future<void> _submitPassRequest() async {
-    // 1. Mandatory Reason Check
     if (_reasonController.text.trim().length < 3) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please provide a valid reason")));
       return;
     }
 
-    // 2. City Pass Logic: Date Lock & Curfew
     DateTime actualInDate = returnDate;
     if (selectedPopupPassType == 'City Pass') {
-      // Force date to today
       selectedDate = DateTime.now();
       actualInDate = selectedDate;
-
-      // Curfew Check (18:00 = 6 PM)
       if (inTime.hour > 18 || (inTime.hour == 18 && inTime.minute > 0)) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("City Pass return time cannot be after 6:00 PM")));
         return;
       }
     }
 
-    // 3. Construct DateTime objects for Logic Check
     DateTime departure = DateTime(selectedDate.year, selectedDate.month, selectedDate.day, outTime.hour, outTime.minute);
     DateTime arrival = DateTime(actualInDate.year, actualInDate.month, actualInDate.day, inTime.hour, inTime.minute);
 
-    // 4. General Logic Check
     if (arrival.isBefore(departure) || arrival.isAtSameMomentAs(departure)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("In-time must be after out-time")));
       return;
     }
 
-    // 5. Special Pass Document Check
     if (selectedPopupPassType == 'Special Pass' && pickedFile == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Supporting document required for Special Pass")));
       return;
@@ -156,13 +134,7 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
       request.fields['floor'] = floor ?? "";
       request.fields['pass_type'] = selectedPopupPassType;
       request.fields['date'] = formatDateOnly(selectedDate);
-      
-      if (selectedPopupPassType == 'City Pass') {
-        request.fields['return_date'] = formatDateOnly(selectedDate);
-      } else {
-        request.fields['return_date'] = formatDateOnly(returnDate);
-      }
-
+      request.fields['return_date'] = formatDateOnly(actualInDate);
       request.fields['out_date_time'] = formatDateTime(selectedDate, outTime);
       request.fields['in_date_time'] = formatDateTime(actualInDate, inTime);
       request.fields['reason'] = _reasonController.text.trim();
@@ -173,31 +145,45 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
         request.files.add(await http.MultipartFile.fromPath('document', pickedFile!.path!));
       }
 
-      print("--- DEBUG: SENDING PASS REQUEST ---");
-      print("URL: ${AppConstants.passrequestUrl}");
-      request.fields.forEach((key, value) {
-        print("Field: $key = $value");
-      });
-      if (pickedFile != null) {
-        print("File: ${pickedFile!.name} Path: ${pickedFile!.path}");
-      }
-      print("-----------------------------------");
       var response = await request.send();
-      final respStr = await response.stream.bytesToString(); // Get actual server response
-      print("SERVER RESPONSE CODE: ${response.statusCode}");
-      print("SERVER RESPONSE BODY: $respStr");
       if (response.statusCode == 200) {
-        if (mounted) Navigator.pop(context);
+        if (mounted) {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Your pass request is submitted successfully!"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
         _reasonController.clear();
         pickedFile = null;
         fetchUserPasses();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Failed to submit request. Status: ${response.statusCode}"),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     } catch (e) {
       debugPrint("Submit Error: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("An error occurred: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => isSubmitting = false);
     }
   }
+
   @override
   Widget build(BuildContext context) {
     List filteredPasses = userPasses.where((pass) {
@@ -206,10 +192,7 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
     }).toList();
 
     return Scaffold(
-
       backgroundColor: softCream,
-
-      // Custom AppBar with rounded bottom
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -230,13 +213,11 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header Section
               const Text("Welcome back,", style: TextStyle(fontSize: 16, color: Colors.brown)),
               const Text("Your Gate Passes", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: primaryMaroon)),
               const SizedBox(height: 25),
-
-              // Glass-style Action Button
               Container(
+                width: double.infinity,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [BoxShadow(color: primaryMaroon.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))],
@@ -249,22 +230,25 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   ),
                   onPressed: () => _showRequestBottomSheet(context),
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.add_circle_outline_rounded, size: 22),
-                      SizedBox(width: 10),
-                      Text("NEW PASS REQUEST", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
+                      const Icon(Icons.add_circle_outline_rounded, size: 22),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          "NEW PASS REQUEST",
+                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
                 ),
               ),
               const SizedBox(height: 35),
-
-              // Filter Tabs
               _buildModernFilters(),
               const SizedBox(height: 20),
-
               if (isPageLoading)
                 const Center(child: Padding(padding: EdgeInsets.all(50), child: CircularProgressIndicator(color: primaryMaroon)))
               else if (filteredPasses.isEmpty)
@@ -312,8 +296,6 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
   Widget _buildModernPassCard(Map<String, dynamic> pass) {
     Color statusColor;
     IconData statusIcon;
-
-    // Normalize Status
     final String currentStatus = (pass['STATUS'] ?? 'PENDING').toString();
     final String statusLower = currentStatus.toLowerCase().trim();
 
@@ -335,9 +317,7 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(30),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 8)),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 15, offset: const Offset(0, 8))],
       ),
       margin: const EdgeInsets.only(bottom: 20),
       child: ClipRRect(
@@ -350,13 +330,20 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Icon(statusIcon, color: statusColor, size: 18),
-                      const SizedBox(width: 8),
-                      Text(currentStatus.toUpperCase(),
-                          style: TextStyle(color: statusColor, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1)),
-                    ],
+                  Flexible(
+                    child: Row(
+                      children: [
+                        Icon(statusIcon, color: statusColor, size: 18),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            currentStatus.toUpperCase(),
+                            style: TextStyle(color: statusColor, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -369,7 +356,8 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(pass['PASS_TYPE'] ?? 'City Pass', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: primaryMaroon)),
+                        Text(pass['PASS_TYPE'] ?? 'City Pass',
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: primaryMaroon)),
                         const SizedBox(height: 10),
                         _rowInfo(Icons.calendar_today_outlined, "Out: ${pass['DATE']}"),
                         const SizedBox(height: 5),
@@ -380,7 +368,6 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
                       ],
                     ),
                   ),
-                  // QR Code Logic
                   if (statusLower == 'approved' || statusLower == 'left campus')
                     GestureDetector(
                       onTap: () => _showQRCode(pass),
@@ -402,12 +389,19 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
       ),
     );
   }
+
   Widget _rowInfo(IconData icon, String text) {
     return Row(
       children: [
         Icon(icon, size: 14, color: Colors.grey.shade500),
         const SizedBox(width: 6),
-        Text(text, style: TextStyle(color: Colors.grey.shade700, fontSize: 13, fontWeight: FontWeight.w500)),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 13, fontWeight: FontWeight.w500),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }
@@ -425,9 +419,7 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
     );
   }
 
-  // --- BOTTOM SHEET UI UPGRADE ---
   void _showRequestBottomSheet(BuildContext context) {
-    // Reset dates to current when opening
     selectedDate = DateTime.now();
     if (selectedPopupPassType == 'City Pass') returnDate = selectedDate;
 
@@ -447,76 +439,77 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
                 const SizedBox(height: 25),
                 const Text("REQUEST NEW PASS", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: primaryMaroon, letterSpacing: 1)),
                 const SizedBox(height: 30),
-
                 _buildModernInputLabel("Pass Type"),
                 _buildModernDropdown(setModalState),
                 const SizedBox(height: 20),
-
-                // Date Selectors
                 Row(
                   children: [
-                    Expanded(child: _buildDateTimePicker(
+                    Expanded(
+                      child: _buildDateTimePicker(
                         label: "Date Out",
-                        // If City Pass, show text only; otherwise show date and allow tap
                         value: DateFormat('dd MMM yyyy').format(selectedDate),
                         onTap: selectedPopupPassType == 'City Pass'
                             ? () => ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("City Pass is only available for today")))
                             : () async {
-                          final dt = await showDatePicker(context: context, initialDate: selectedDate, firstDate: DateTime.now(), lastDate: DateTime(2027));
-                          if (dt != null) setModalState(() {
-                            selectedDate = dt;
-                            if (returnDate.isBefore(dt)) returnDate = dt;
-                          });
-                        }
-                    )),
+                                final dt = await showDatePicker(
+                                    context: context, initialDate: selectedDate, firstDate: DateTime.now(), lastDate: DateTime(2027));
+                                if (dt != null) {
+                                  setModalState(() {
+                                    selectedDate = dt;
+                                    if (returnDate.isBefore(dt)) returnDate = dt;
+                                  });
+                                }
+                              },
+                      ),
+                    ),
                     const SizedBox(width: 15),
                     if (selectedPopupPassType != 'City Pass')
-                      Expanded(child: _buildDateTimePicker(
+                      Expanded(
+                        child: _buildDateTimePicker(
                           label: "Return Date",
                           value: DateFormat('dd MMM yyyy').format(returnDate),
                           onTap: () async {
-                            final dt = await showDatePicker(context: context, initialDate: returnDate, firstDate: selectedDate, lastDate: DateTime(2027));
+                            final dt = await showDatePicker(
+                                context: context, initialDate: returnDate, firstDate: selectedDate, lastDate: DateTime(2027));
                             if (dt != null) setModalState(() => returnDate = dt);
-                          }
-                      )),
+                          },
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: 20),
-
-                // Time Selectors
                 Row(
                   children: [
-                    Expanded(child: _buildDateTimePicker(
+                    Expanded(
+                      child: _buildDateTimePicker(
                         label: "Out Time",
                         value: outTime.format(context),
                         onTap: () async {
                           final tm = await showTimePicker(context: context, initialTime: outTime);
                           if (tm != null) setModalState(() => outTime = tm);
-                        }
-                    )),
+                        },
+                      ),
+                    ),
                     const SizedBox(width: 15),
-                    Expanded(child: _buildDateTimePicker(
+                    Expanded(
+                      child: _buildDateTimePicker(
                         label: "In Time",
                         value: inTime.format(context),
                         onTap: () async {
                           final tm = await showTimePicker(context: context, initialTime: inTime);
                           if (tm != null) setModalState(() => inTime = tm);
-                        }
-                    )),
+                        },
+                      ),
+                    ),
                   ],
                 ),
-
-                // Visual Warning for City Pass Curfew
                 if (selectedPopupPassType == 'City Pass' && (inTime.hour > 18 || (inTime.hour == 18 && inTime.minute > 0)))
                   const Padding(
                     padding: EdgeInsets.only(top: 8.0),
                     child: Text("⚠️ Return time for City Pass must be 6:00 PM or earlier.",
                         style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold)),
                   ),
-
                 const SizedBox(height: 20),
-
-                // Document Picker for Special Pass
                 if (selectedPopupPassType == 'Special Pass') ...[
                   _buildModernInputLabel("Supporting Document (Required)"),
                   GestureDetector(
@@ -530,10 +523,8 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            pickedFile == null ? Icons.upload_file : Icons.check_circle,
-                            color: pickedFile == null ? Colors.grey : Colors.green,
-                          ),
+                          Icon(pickedFile == null ? Icons.upload_file : Icons.check_circle,
+                              color: pickedFile == null ? Colors.grey : Colors.green),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
@@ -556,14 +547,12 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
                   ),
                   const SizedBox(height: 20),
                 ],
-
                 _buildModernInputLabel("Reason for Leave (Mandatory)"),
                 TextField(
                   controller: _reasonController,
                   maxLines: 2,
-                  decoration: _inputStyle("Enter specific reason details..."),
+                  decoration: _inputStyle("Reason for requesting pass"),
                 ),
-
                 const SizedBox(height: 35),
                 SizedBox(
                   width: double.infinity,
@@ -588,13 +577,14 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
     );
   }
 
-  // --- REUSABLE UI COMPONENTS ---
-
   Widget _buildModernInputLabel(String label) {
-    return Align(alignment: Alignment.centerLeft, child: Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 4),
-      child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.brown, fontSize: 13)),
-    ));
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 8, left: 4),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.brown, fontSize: 13)),
+      ),
+    );
   }
 
   InputDecoration _inputStyle(String hint) {
@@ -617,11 +607,20 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
           child: Container(
             padding: const EdgeInsets.all(15),
             decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(15)),
-            child: Row(children: [
-              const Icon(Icons.access_time_rounded, size: 18, color: primaryMaroon),
-              const SizedBox(width: 10),
-              Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
-            ]),
+            child: Row(
+              children: [
+                const Icon(Icons.access_time_rounded, size: 18, color: primaryMaroon),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    value,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -636,12 +635,16 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
         child: DropdownButton<String>(
           isExpanded: true,
           value: selectedPopupPassType,
-          items: ['City Pass', 'Home Pass', 'Special Pass'].map((val) => DropdownMenuItem(value: val, child: Text(val, style: const TextStyle(fontWeight: FontWeight.bold)))).toList(),
+          items: ['City Pass', 'Home Pass', 'Special Pass']
+              .map((val) => DropdownMenuItem(value: val, child: Text(val, style: const TextStyle(fontWeight: FontWeight.bold))))
+              .toList(),
           onChanged: (newValue) {
-            if (newValue != null) setModalState(() {
-              selectedPopupPassType = newValue;
-              if (newValue == 'City Pass') returnDate = selectedDate;
-            });
+            if (newValue != null) {
+              setModalState(() {
+                selectedPopupPassType = newValue;
+                if (newValue == 'City Pass') returnDate = selectedDate;
+              });
+            }
           },
         ),
       ),
@@ -662,7 +665,9 @@ class _PassRequestScreenState extends State<PassRequestScreen> {
               const SizedBox(height: 25),
               QrImageView(data: "PASS_ID:${pass['ID']}", size: 200, foregroundColor: primaryMaroon),
               const SizedBox(height: 25),
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text("CLOSE", style: TextStyle(color: accentGold, fontWeight: FontWeight.bold))),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("CLOSE", style: TextStyle(color: accentGold, fontWeight: FontWeight.bold))),
             ],
           ),
         ),

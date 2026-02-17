@@ -1,4 +1,4 @@
-package com.example.hostel
+package `in`.ac.gmu.hostel
 
 import io.flutter.embedding.android.FlutterActivity
 

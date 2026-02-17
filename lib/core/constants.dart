@@ -1,8 +1,8 @@
 
 class AppConstants {
-  static const String ip = "172.21.2.173";
+  static const String ip = "";
   static const String port = "80";
-  static const String baseUrl = "http://$ip:$port/hostel_backend";
+  static const String baseUrl = "https://erp.gmit.info/v3/gmu_hostel_api";
   static const String loginUrl = "$baseUrl/login.php";
   static const String profileUrl = "$baseUrl/get_profile.php";
   static const String passrequestUrl = "$baseUrl/save_pass.php";
@@ -19,7 +19,4 @@ class AppConstants {
   static const bool isForgotPasswordEnabled = true;
   // Logic toggle: true = send to DB, false = just show alert
   static const bool isNotificationBackendReady = false;
-
-
-
 }

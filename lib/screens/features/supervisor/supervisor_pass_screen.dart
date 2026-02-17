@@ -216,12 +216,15 @@ class _SupervisorPassScreenState extends State<SupervisorPassScreen> with Single
                 icon: const Icon(Icons.arrow_back, color: Colors.white),
                 onPressed: () => Navigator.pop(context),
               ),
-              Text(
-                "GATE PASS SUPERVISOR",
-                style: GoogleFonts.inter(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.1,
+              Expanded(
+                child: Text(
+                  "GATE PASS REQUEST",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.1,
+                  ),
                 ),
               ),
               IconButton(
@@ -397,7 +400,21 @@ class _SupervisorPassScreenState extends State<SupervisorPassScreen> with Single
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.network(imageUrl, fit: BoxFit.contain),
+            Image.network(
+              imageUrl,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return const Padding(
+                  padding: EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                      Text("Failed to load image"),
+                    ],
+                  ),
+                );
+              },
+            ),
             TextButton(onPressed: () => Navigator.pop(context), child: const Text("CLOSE")),
           ],
         ),
